@@ -1757,11 +1757,48 @@ voice_work_dispatch(MCPXAPUState *d,
     qemu_mutex_unlock(&vwd->lock);
 }
 
+static int mcpx_apu_default_vp_worker_count(void)
+{
+    int cpu_count = MAX(1, SDL_GetCPUCount());
+
+#ifdef __ANDROID__
+    /*
+     * Mobile SoCs are often oversubscribed already (TCG + render + I/O).
+     * Keep VP worker defaults conservative to reduce thread contention and
+     * audio underruns; allow explicit override via env.
+     */
+    const char *value = getenv("XEMU_ANDROID_VP_WORKERS");
+    if (value && value[0] != '\0') {
+        char *end = NULL;
+        long parsed = strtol(value, &end, 10);
+        if (end != value && *end == '\0' && parsed > 0) {
+            return (int)parsed;
+        }
+    }
+
+    if (cpu_count <= 2) {
+        return 1;
+    }
+    if (cpu_count <= 4) {
+        return 2;
+    }
+    if (cpu_count <= 6) {
+        return 3;
+    }
+    return 4;
+#else
+    return cpu_count;
+#endif
+}
+
 static void voice_work_init(MCPXAPUState *d)
 {
     VoiceWorkDispatch *vwd = &d->vp.voice_work_dispatch;
 
-    int num_workers = g_config.audio.vp.num_workers ?: SDL_GetCPUCount();
+    int num_workers = g_config.audio.vp.num_workers;
+    if (num_workers <= 0) {
+        num_workers = mcpx_apu_default_vp_worker_count();
+    }
     vwd->num_workers = MAX(1, MIN(num_workers, MAX_VOICE_WORKERS));
     vwd->workers = g_malloc0_n(vwd->num_workers, sizeof(VoiceWorker));
     vwd->workers_should_exit = false;

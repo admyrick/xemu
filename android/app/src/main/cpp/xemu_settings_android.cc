@@ -196,6 +196,8 @@ const char *xemu_settings_get_default_eeprom_path(void)
 
 bool xemu_settings_load(void)
 {
+    const int kMaxAudioVpWorkers = 16;
+
     xemu_settings_apply_defaults();
     error_msg.clear();
     setenv("XEMU_ANDROID_FORCE_CPU_BLIT", "0", 1);
@@ -219,6 +221,8 @@ bool xemu_settings_load(void)
         auto general = tbl["general"];
         auto display = tbl["display"];
         auto display_window = display["window"];
+        auto audio = tbl["audio"];
+        auto audio_vp = audio["vp"];
         auto perf = tbl["perf"];
         auto android_cfg = tbl["android"];
         auto sys = tbl["sys"];
@@ -259,6 +263,32 @@ bool xemu_settings_load(void)
             g_config.perf.cache_shaders = *cache_shaders;
         }
 
+        // Audio settings
+        if (auto vp_workers = audio_vp["num_workers"].value<int64_t>()) {
+            int workers = (int)*vp_workers;
+            if (workers < 0) {
+                workers = 0;
+            } else if (workers > kMaxAudioVpWorkers) {
+                workers = kMaxAudioVpWorkers;
+            }
+            g_config.audio.vp.num_workers = workers;
+        }
+        if (auto use_dsp = audio["use_dsp"].value<bool>()) {
+            g_config.audio.use_dsp = *use_dsp;
+        }
+        if (auto hrtf = audio["hrtf"].value<bool>()) {
+            g_config.audio.hrtf = *hrtf;
+        }
+        if (auto volume_limit = audio["volume_limit"].value<double>()) {
+            double volume = *volume_limit;
+            if (volume < 0.0) {
+                volume = 0.0;
+            } else if (volume > 1.0) {
+                volume = 1.0;
+            }
+            g_config.audio.volume_limit = volume;
+        }
+
         // Android-specific settings
         if (auto force_cpu_blit = android_cfg["force_cpu_blit"].value<bool>()) {
             setenv("XEMU_ANDROID_FORCE_CPU_BLIT", *force_cpu_blit ? "1" : "0", 1);
@@ -290,6 +320,43 @@ bool xemu_settings_load(void)
             char tb_size_str[16];
             snprintf(tb_size_str, sizeof(tb_size_str), "%d", tb_size);
             setenv("XEMU_ANDROID_TCG_TB_SIZE", tb_size_str, 1);
+        }
+        if (auto inline_aio = android_cfg["inline_aio"].value<bool>()) {
+            setenv("XEMU_ANDROID_INLINE_AIO", *inline_aio ? "1" : "0", 1);
+        }
+        if (auto vp_workers = android_cfg["vp_workers"].value<int64_t>()) {
+            int workers = (int)*vp_workers;
+            if (workers < 0) {
+                workers = 0;
+            } else if (workers > kMaxAudioVpWorkers) {
+                workers = kMaxAudioVpWorkers;
+            }
+            char workers_str[16];
+            snprintf(workers_str, sizeof(workers_str), "%d", workers);
+            setenv("XEMU_ANDROID_VP_WORKERS", workers_str, 1);
+        }
+        if (auto audio_samples = android_cfg["audio_samples"].value<int64_t>()) {
+            int samples = (int)*audio_samples;
+            if (samples < 256) {
+                samples = 256;
+            } else if (samples > 4096) {
+                samples = 4096;
+            }
+            char samples_str[16];
+            snprintf(samples_str, sizeof(samples_str), "%d", samples);
+            setenv("XEMU_ANDROID_AUDIO_SAMPLES", samples_str, 1);
+        }
+        if (auto audio_fifo_frames =
+                android_cfg["audio_fifo_frames"].value<int64_t>()) {
+            int fifo_frames = (int)*audio_fifo_frames;
+            if (fifo_frames < 3) {
+                fifo_frames = 3;
+            } else if (fifo_frames > 32) {
+                fifo_frames = 32;
+            }
+            char fifo_str[16];
+            snprintf(fifo_str, sizeof(fifo_str), "%d", fifo_frames);
+            setenv("XEMU_ANDROID_AUDIO_FIFO_FRAMES", fifo_str, 1);
         }
 
         // System file paths

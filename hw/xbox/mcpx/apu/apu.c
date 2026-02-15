@@ -189,6 +189,29 @@ static void sleep_ns(int64_t ns)
 #endif
 }
 
+static int getenv_int_clamped(const char *name, int min_value, int max_value,
+                              int fallback)
+{
+    const char *value = getenv(name);
+    if (!value || value[0] == '\0') {
+        return fallback;
+    }
+
+    char *end = NULL;
+    long parsed = strtol(value, &end, 10);
+    if (end == value || *end != '\0') {
+        return fallback;
+    }
+
+    if (parsed < min_value) {
+        return min_value;
+    }
+    if (parsed > max_value) {
+        return max_value;
+    }
+    return (int)parsed;
+}
+
 static void monitor_sink_cb(void *opaque, uint8_t *stream, int free_b)
 {
     MCPXAPUState *s = MCPX_APU_DEVICE(opaque);
@@ -199,29 +222,37 @@ static void monitor_sink_cb(void *opaque, uint8_t *stream, int free_b)
     }
 
     int avail = 0;
-    while (avail < free_b) {
+    for (int i = 0; i < 10; i++) {
         qemu_spin_lock(&s->monitor.fifo_lock);
         avail = fifo8_num_used(&s->monitor.fifo);
         qemu_spin_unlock(&s->monitor.fifo_lock);
-        if (avail < free_b) {
-            sleep_ns(1000000);
-            qemu_cond_broadcast(&s->cond);
+        if (avail >= free_b) {
+            break;
         }
+        sleep_ns(500000);
+        qemu_cond_broadcast(&s->cond);
         if (!runstate_is_running()) {
             memset(stream, 0, free_b);
             return;
         }
     }
 
+    int copied = 0;
     int to_copy = MIN(free_b, avail);
-    while (to_copy > 0) {
+    while (copied < to_copy) {
         uint32_t chunk_len = 0;
         qemu_spin_lock(&s->monitor.fifo_lock);
-        chunk_len = fifo8_pop_buf(&s->monitor.fifo, stream, to_copy);
-        assert(chunk_len <= to_copy);
+        chunk_len = fifo8_pop_buf(&s->monitor.fifo, stream + copied,
+                                  to_copy - copied);
         qemu_spin_unlock(&s->monitor.fifo_lock);
-        stream += chunk_len;
-        to_copy -= chunk_len;
+        if (!chunk_len) {
+            break;
+        }
+        copied += chunk_len;
+    }
+
+    if (copied < free_b) {
+        memset(stream + copied, 0, free_b - copied);
     }
 
     qemu_cond_broadcast(&s->cond);
@@ -230,13 +261,24 @@ static void monitor_sink_cb(void *opaque, uint8_t *stream, int free_b)
 static void monitor_init(MCPXAPUState *d)
 {
     qemu_spin_init(&d->monitor.fifo_lock);
-    fifo8_create(&d->monitor.fifo, 3 * (256 * 2 * 2));
+
+    int fifo_frames = 3;
+    int audio_samples = 512;
+#ifdef __ANDROID__
+    fifo_frames = 8;
+    audio_samples = 1024;
+    fifo_frames = getenv_int_clamped("XEMU_ANDROID_AUDIO_FIFO_FRAMES", 3, 32,
+                                     fifo_frames);
+    audio_samples = getenv_int_clamped("XEMU_ANDROID_AUDIO_SAMPLES", 256, 4096,
+                                       audio_samples);
+#endif
+    fifo8_create(&d->monitor.fifo, fifo_frames * sizeof(d->monitor.frame_buf));
 
     struct SDL_AudioSpec sdl_audio_spec = {
         .freq = 48000,
         .format = AUDIO_S16LSB,
         .channels = 2,
-        .samples = 512,
+        .samples = audio_samples,
         .callback = monitor_sink_cb,
         .userdata = d,
     };

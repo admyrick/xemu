@@ -11,10 +11,12 @@
 #include <jni.h>
 
 #include <climits>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <sys/stat.h>
@@ -205,6 +207,69 @@ static std::string JStringToString(JNIEnv* env, jstring value) {
   return out;
 }
 
+static std::string ToLowerAscii(std::string value) {
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+  return value;
+}
+
+static std::string GetBuildField(JNIEnv* env, const char* field_name) {
+  jclass buildClass = env->FindClass("android/os/Build");
+  if (!buildClass) {
+    HasException(env, "Build class lookup");
+    return {};
+  }
+  jfieldID field = env->GetStaticFieldID(buildClass, field_name, "Ljava/lang/String;");
+  if (!field) {
+    HasException(env, field_name);
+    env->DeleteLocalRef(buildClass);
+    return {};
+  }
+  jstring value =
+      static_cast<jstring>(env->GetStaticObjectField(buildClass, field));
+  if (HasException(env, field_name)) {
+    env->DeleteLocalRef(buildClass);
+    return {};
+  }
+  std::string out = JStringToString(env, value);
+  if (value) {
+    env->DeleteLocalRef(value);
+  }
+  env->DeleteLocalRef(buildClass);
+  return out;
+}
+
+static bool ShouldEnableInlineAioWorkaround() {
+  const char* forced = SDL_getenv("XEMU_ANDROID_INLINE_AIO");
+  if (forced) {
+    return forced[0] != '\0' && forced[0] != '0';
+  }
+
+  JNIEnv* env = GetEnv();
+  if (!env) {
+    return false;
+  }
+
+  const std::string device = ToLowerAscii(GetBuildField(env, "DEVICE"));
+  const std::string product = ToLowerAscii(GetBuildField(env, "PRODUCT"));
+  const std::string model = ToLowerAscii(GetBuildField(env, "MODEL"));
+
+  static const char* kAffectedDevices[] = {
+    "duchamp",
+  };
+
+  for (const char* marker : kAffectedDevices) {
+    if (device == marker ||
+        product.find(marker) != std::string::npos ||
+        model.find(marker) != std::string::npos) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 static std::string GetPrefString(JNIEnv* env, jobject activity, const char* key) {
   jclass activityClass = env->GetObjectClass(activity);
   jmethodID getPrefs = env->GetMethodID(activityClass, "getSharedPreferences",
@@ -324,10 +389,13 @@ static bool WriteConfigToml(const std::string& config_path,
   toml::table* general = EnsureTable(tbl, "general");
   toml::table* display = EnsureTable(tbl, "display");
   toml::table* display_window = EnsureTable(*display, "window");
+  toml::table* audio = EnsureTable(tbl, "audio");
+  toml::table* audio_vp = EnsureTable(*audio, "vp");
   toml::table* android = EnsureTable(tbl, "android");
   toml::table* sys = EnsureTable(tbl, "sys");
   toml::table* files = EnsureTable(*sys, "files");
-  if (!general || !display || !display_window || !android || !sys || !files) {
+  if (!general || !display || !display_window || !audio || !audio_vp ||
+      !android || !sys || !files) {
     LogErrorFmt("Failed to build config tables at %s", config_path.c_str());
     return false;
   }
@@ -339,6 +407,15 @@ static bool WriteConfigToml(const std::string& config_path,
   }
   if (!display_window->contains("vsync")) {
     display_window->insert_or_assign("vsync", false);
+  }
+  if (!audio_vp->contains("num_workers")) {
+    audio_vp->insert_or_assign("num_workers", 0);
+  }
+  if (!audio->contains("hrtf")) {
+    audio->insert_or_assign("hrtf", true);
+  }
+  if (!audio->contains("volume_limit")) {
+    audio->insert_or_assign("volume_limit", 1.0);
   }
   if (!android->contains("force_cpu_blit")) {
     android->insert_or_assign("force_cpu_blit", false);
@@ -523,6 +600,12 @@ extern "C" int SDL_main(int argc, char* argv[]) {
   }
   SDL_GameControllerEventState(SDL_ENABLE);
   LoadGameControllerMappingsFromAssets();
+
+  if (!SDL_getenv("XEMU_ANDROID_INLINE_AIO")) {
+    const bool use_inline_aio = ShouldEnableInlineAioWorkaround();
+    setenv("XEMU_ANDROID_INLINE_AIO", use_inline_aio ? "1" : "0", 1);
+    LogInfoFmt("XEMU_ANDROID_INLINE_AIO=%s", use_inline_aio ? "1" : "0");
+  }
 
   SetupFiles setup = SyncSetupFiles();
 

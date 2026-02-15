@@ -2529,13 +2529,12 @@ static int coroutine_fn raw_thread_pool_submit(ThreadPoolFunc func, void *arg)
     /*
      * Some Android devices crash in coroutine context switches used by
      * thread_pool_submit_co(). Allow forcing synchronous execution for
-     * raw I/O to avoid that path. Enabled by default on Android, set
-     * XEMU_ANDROID_INLINE_AIO=0 to restore thread-pool behavior.
+     * raw I/O to avoid that path when explicitly enabled.
      */
     static int inline_aio = -1;
     if (inline_aio < 0) {
         const char *value = getenv("XEMU_ANDROID_INLINE_AIO");
-        inline_aio = (!value || value[0] != '0') ? 1 : 0;
+        inline_aio = (value && value[0] != '0') ? 1 : 0;
     }
     if (inline_aio) {
         return func(arg);
