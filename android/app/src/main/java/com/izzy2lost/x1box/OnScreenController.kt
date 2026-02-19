@@ -39,7 +39,8 @@ class OnScreenController @JvmOverloads constructor(
   data class ButtonState(
     val center: PointF,
     val radius: Float,
-    var isPressed: Boolean = false
+    var isPressed: Boolean = false,
+    var activePointerId: Int = -1
   )
 
   data class StickState(
@@ -306,8 +307,11 @@ class OnScreenController @JvmOverloads constructor(
           )
         }
       }
-      MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_CANCEL -> {
+      MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
         handleTouchUp(pointerId)
+      }
+      MotionEvent.ACTION_CANCEL -> {
+        handleCancel()
       }
     }
 
@@ -327,8 +331,9 @@ class OnScreenController @JvmOverloads constructor(
 
     // Check buttons
     buttons.forEach { (button, state) ->
-      if (isPointInCircle(x, y, state.center, state.radius)) {
+      if (state.activePointerId == -1 && isPointInCircle(x, y, state.center, state.radius)) {
         state.isPressed = true
+        state.activePointerId = pointerId
         controllerListener?.onButtonPressed(button)
         return
       }
@@ -359,8 +364,31 @@ class OnScreenController @JvmOverloads constructor(
 
     // Release buttons
     buttons.forEach { (button, state) ->
+      if (state.activePointerId == pointerId) {
+        state.isPressed = false
+        state.activePointerId = -1
+        controllerListener?.onButtonReleased(button)
+      }
+    }
+  }
+
+  private fun handleCancel() {
+    sticks.forEach { (stick, state) ->
+      if (state.activePointerId != -1) {
+        state.activePointerId = -1
+        state.currentPos = PointF(0f, 0f)
+        controllerListener?.onStickMoved(stick, 0f, 0f)
+        if (state.isPressed) {
+          state.isPressed = false
+          controllerListener?.onStickReleased(stick)
+        }
+      }
+    }
+
+    buttons.forEach { (button, state) ->
       if (state.isPressed) {
         state.isPressed = false
+        state.activePointerId = -1
         controllerListener?.onButtonReleased(button)
       }
     }

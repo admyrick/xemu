@@ -23,8 +23,16 @@ class ControllerInputBridge : OnScreenController.ControllerListener {
 
   override fun onButtonPressed(button: OnScreenController.Button) {
     try {
-      val keyCode = getKeyCodeForButton(button)
-      SDLControllerManager.onNativePadDown(VIRTUAL_DEVICE_ID, keyCode)
+      when (button) {
+        OnScreenController.Button.LEFT_TRIGGER ->
+          SDLControllerManager.onNativeJoy(VIRTUAL_DEVICE_ID, AXIS_LEFT_TRIGGER, 1.0f)
+        OnScreenController.Button.RIGHT_TRIGGER ->
+          SDLControllerManager.onNativeJoy(VIRTUAL_DEVICE_ID, AXIS_RIGHT_TRIGGER, 1.0f)
+        else -> {
+          val keyCode = getKeyCodeForButton(button)
+          SDLControllerManager.onNativePadDown(VIRTUAL_DEVICE_ID, keyCode)
+        }
+      }
     } catch (e: Exception) {
       android.util.Log.e("ControllerBridge", "Error on button press: ${e.message}")
     }
@@ -32,8 +40,16 @@ class ControllerInputBridge : OnScreenController.ControllerListener {
 
   override fun onButtonReleased(button: OnScreenController.Button) {
     try {
-      val keyCode = getKeyCodeForButton(button)
-      SDLControllerManager.onNativePadUp(VIRTUAL_DEVICE_ID, keyCode)
+      when (button) {
+        OnScreenController.Button.LEFT_TRIGGER ->
+          SDLControllerManager.onNativeJoy(VIRTUAL_DEVICE_ID, AXIS_LEFT_TRIGGER, 0.0f)
+        OnScreenController.Button.RIGHT_TRIGGER ->
+          SDLControllerManager.onNativeJoy(VIRTUAL_DEVICE_ID, AXIS_RIGHT_TRIGGER, 0.0f)
+        else -> {
+          val keyCode = getKeyCodeForButton(button)
+          SDLControllerManager.onNativePadUp(VIRTUAL_DEVICE_ID, keyCode)
+        }
+      }
     } catch (e: Exception) {
       android.util.Log.e("ControllerBridge", "Error on button release: ${e.message}")
     }
