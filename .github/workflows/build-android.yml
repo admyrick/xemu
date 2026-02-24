@@ -20,13 +20,15 @@ jobs:
 
       - name: Make Gradle Wrapper executable
         run: chmod +x ./gradlew
+        working-directory: ./android
 
       - name: Build APK
         run: ./gradlew assembleDebug
-
+        working-directory: ./android
+        
       - name: Upload APK as Artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
-          # This wildcard path ensures it finds the APK even if the app uses product flavors
-          path: app/build/outputs/apk/debug/**/*.apk
+          # Notice we also updated the path here to start inside the android folder
+          path: android/app/build/outputs/apk/debug/**/*.apk
