@@ -18,6 +18,11 @@ jobs:
           distribution: 'zulu'
           java-version: '17' 
 
+      - name: Remove hardcoded Windows Java path
+        # This searches the file for 'org.gradle.java.home' and deletes the line
+        run: sed -i '/org.gradle.java.home/d' gradle.properties || true
+        working-directory: ./android
+
       - name: Restore missing Gradle Wrapper jar
         run: gradle wrapper
         working-directory: ./android
